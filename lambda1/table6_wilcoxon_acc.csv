@@ -1,0 +1,4 @@
+"Pair","N","Mean_GOLD","Mean_None","Mean_Diff","W","p_value","Sig"
+"NB(disc) vs GaussNB(raw)",21,0.8177,0.7612,0.0565,134.5,0.5202,"no"
+"LR(disc) vs LR(raw)",21,0.7822,0.7924,-0.0102,101.5,0.6389,"no"
+"XGB(disc) vs XGB(raw)",21,0.8329,0.856,-0.0231,46.5,0.0534,"no"
