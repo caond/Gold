@@ -1,0 +1,23 @@
+"Dataset","GOLD","CAIM","CACC","Ameva","ChiMerge","Chi2","ExtendChi2","MDLP","Best"
+"Iris",NA,NA,NA,NA,NA,NA,NA,NA,NA
+"BreastCancer",NA,NA,NA,NA,NA,NA,NA,NA,NA
+"Ionosphere",NA,NA,NA,0.5,NA,0.5,0.5,NA,"Ameva, Chi2, ExtendChi2"
+"Glass",NA,0.4432,0.556,0.4833,0.5629,0.4885,0.507,0.5571,"ChiMerge"
+"Vehicle",NA,NA,NA,NA,NA,0.5,0.5,NA,"Chi2, ExtendChi2"
+"Sonar",NA,0.5,NA,0.5,NA,0.5,NA,NA,"CAIM, Ameva, Chi2"
+"PimaDiabetes",NA,NA,NA,NA,NA,NA,NA,NA,NA
+"Vowel",NA,NA,NA,NA,NA,NA,NA,NA,NA
+"Satellite",NA,NA,NA,NA,NA,NA,NA,NA,NA
+"Shuttle",NA,NA,NA,NA,NA,NA,NA,NA,NA
+"BostonHousing",NA,NA,NA,NA,NA,NA,0.5,NA,"ExtendChi2"
+"Ozone",NA,0.5,0.5,0.5,NA,0.5,0.5,NA,"CAIM, CACC, Ameva, Chi2, ExtendChi2"
+"Waveform",0.651,0.4507,0.5518,0.4317,0.6134,0.5359,0.616,0.6645,"MDLP"
+"Normals2D",0.6095,0.6165,0.5701,0.5701,0.6309,0.4935,0.5476,0.6402,"MDLP"
+"Circle",0.6429,0.5031,0.4509,0.35,0.6031,0.5,0.5,0.6567,"MDLP"
+"Spirals",0.67,0.3833,0.3667,0.3833,0.5967,0.5133,0.5,0.5733,"GOLD"
+"Cassini",1,0.2521,0.2521,0.2521,1,0.5,0.5,1,"GOLD, ChiMerge, MDLP"
+"Ringnorm",0.6767,0.47,0.46,0.4433,0.6233,0.45,0.4667,0.6733,"GOLD"
+"Threenorm",0.5867,0.5067,0.48,0.5067,0.5333,0.53,0.53,0.6567,"MDLP"
+"Twonorm",0.6567,0.5067,0.5067,0.5067,0.5567,0.54,0.5533,0.7,"MDLP"
+"AirQuality",NA,0.5,0.5,0.5,NA,0.5,0.5,NA,"CAIM, CACC, Ameva, Chi2, ExtendChi2"
+"Mean",0.6867,0.4694,0.4722,0.4559,0.6356,0.5037,0.5158,0.6802,"—"

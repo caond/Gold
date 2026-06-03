@@ -1162,32 +1162,45 @@ make_table1 <- function(datasets, meta) {
 # =============================================================================
 
 run_comparison1 <- function(datasets, disc_methods,
-                            clf_types=c("nb","oner","lr","xgb"),
-                            k=10, seed=42) {
+                            clf_types = c("nb", "oner", "lr", "xgb"),
+                            k = 10, seed = 42) {
+
   clf_available <- clf_types[vapply(clf_types, function(ct)
-    switch(ct, nb=TRUE, oner=TRUE,
-           lr=has_pkg("nnet"), xgb=has_pkg("xgboost"), FALSE), logical(1))]
-  clf_labels <- c(nb="NaiveBayes",lr="LogisticReg",xgb="XGBoost",oner="OneR")
-  rows       <- list()
-  acc_matrix <- matrix(NA_real_, nrow=length(datasets), ncol=length(disc_methods),
-                       dimnames=list(names(datasets), names(disc_methods)))
-  auc_matrix <- matrix(NA_real_, nrow=length(datasets), ncol=length(disc_methods),
-                       dimnames=list(names(datasets), names(disc_methods)))
+    switch(ct, nb = TRUE, oner = TRUE,
+           lr  = has_pkg("nnet"), xgb = has_pkg("xgboost"), FALSE), logical(1))]
 
-  cat("\n",rep("=",65),"\n",sep="")
+  clf_labels <- c(nb = "NaiveBayes", lr = "LogisticReg",
+                  xgb = "XGBoost",   oner = "OneR")
+
+  rows <- list()
+  disc_nms <- names(disc_methods)
+  ds_nms   <- names(datasets)
+
+  # ── One acc/auc matrix per classifier ─────────────────────────────────────
+  make_mat <- function() {
+    matrix(NA_real_,
+           nrow = length(ds_nms),
+           ncol = length(disc_nms),
+           dimnames = list(ds_nms, disc_nms))
+  }
+  acc_matrices <- setNames(lapply(clf_available, function(ct) make_mat()), clf_available)
+  auc_matrices <- setNames(lapply(clf_available, function(ct) make_mat()), clf_available)
+
+  cat("\n", rep("=", 65), "\n", sep = "")
   cat(" COMPARISON 1 — GOLD vs competing discretisers\n")
-  cat(rep("=",65),"\n",sep="")
+  cat(rep("=", 65), "\n", sep = "")
 
-  for (ds_name in names(datasets)) {
+  for (ds_name in ds_nms) {
     data <- datasets[[ds_name]]
     cat(sprintf("\n  [%s]  (%d x %d)\n", ds_name, nrow(data), ncol(data)))
-    for (disc_nm in names(disc_methods)) {
+
+    for (disc_nm in disc_nms) {
       cat(sprintf("    %-15s ...", disc_nm))
       res <- tryCatch(
-        cv_run(data, disc_fn=disc_methods[[disc_nm]],
-               clf_types=clf_available, k=k, seed=seed,
-               continuous=FALSE, track_bins=TRUE),
-        error=function(e){cat(" ERROR:",conditionMessage(e),"\n");NULL})
+        cv_run(data, disc_fn = disc_methods[[disc_nm]],
+               clf_types = clf_available, k = k, seed = seed,
+               continuous = FALSE, track_bins = TRUE),
+        error = function(e) { cat(" ERROR:", conditionMessage(e), "\n"); NULL })
       if (is.null(res)) { cat("\n"); next }
 
       r2_str <- if (!is.na(res$mean_R2adj))
@@ -1195,30 +1208,184 @@ run_comparison1 <- function(datasets, disc_methods,
       cat(sprintf("  bins=%.1f%s  disc=%.2fs",
                   res$avg_bins, r2_str, res$disc_time))
 
-      if ("nb" %in% clf_available) {
-        acc_matrix[ds_name, disc_nm] <- res$accuracy["nb"]
-        auc_matrix[ds_name, disc_nm] <- res$auc["nb"]
-      }
-
       for (ct in clf_available) {
-        auc_str <- if (is.na(res$auc[ct])) "NA" else sprintf("%.3f", res$auc[ct])
-        cat(sprintf("  %s=%.1f%%/AUC=%s", clf_labels[ct], res$accuracy[ct]*100, auc_str))
-        rows[[length(rows)+1]] <- data.frame(
-          Dataset      = ds_name,
-          Discretizer  = disc_nm,
-          Classifier   = clf_labels[ct],
-          Accuracy     = res$accuracy[ct],
-          AUC          = res$auc[ct],
-          Avg_Bins     = res$avg_bins,
-          Mean_R2adj   = res$mean_R2adj,
-          Disc_Time_s  = res$disc_time,
-          stringsAsFactors=FALSE)
+        acc_matrices[[ct]][ds_name, disc_nm] <- res$accuracy[ct]
+        auc_matrices[[ct]][ds_name, disc_nm] <- res$auc[ct]
+
+        auc_str <- if (is.na(res$auc[ct])) "NA"
+        else sprintf("%.3f", res$auc[ct])
+        cat(sprintf("  %s=%.1f%%/AUC=%s",
+                    clf_labels[ct], res$accuracy[ct] * 100, auc_str))
+
+        rows[[length(rows) + 1]] <- data.frame(
+          Dataset     = ds_name,
+          Discretizer = disc_nm,
+          Classifier  = clf_labels[ct],
+          Accuracy    = res$accuracy[ct],
+          AUC         = res$auc[ct],
+          Avg_Bins    = res$avg_bins,
+          Mean_R2adj  = res$mean_R2adj,
+          Disc_Time_s = res$disc_time,
+          stringsAsFactors = FALSE)
       }
       cat("\n")
     }
   }
-  list(results=do.call(rbind, rows), acc_matrix=acc_matrix, auc_matrix=auc_matrix)
+
+  list(results      = do.call(rbind, rows),
+       acc_matrices = acc_matrices,   # named list: ct -> matrix
+       auc_matrices = auc_matrices,
+       # keep old names pointing to NB for backward compat with make_table2/3
+       acc_matrix   = acc_matrices[["nb"]],
+       auc_matrix   = auc_matrices[["nb"]])
 }
+
+
+# =============================================================================
+# make_table3 — accuracy + AUC table for EVERY classifier
+# =============================================================================
+
+make_table3 <- function(bench1) {
+
+  clf_labels <- c(nb = "NaiveBayes", lr = "LogisticReg",
+                  xgb = "XGBoost",   oner = "OneR")
+
+  for (ct in names(bench1$acc_matrices)) {
+    lbl      <- clf_labels[ct]
+    acc_mat  <- bench1$acc_matrices[[ct]]
+    auc_mat  <- bench1$auc_matrices[[ct]]
+
+    # ── Accuracy table ───────────────────────────────────────────────────────
+    t_acc <- as.data.frame(round(acc_mat, 4))
+    t_acc$Best <- apply(acc_mat, 1, function(r) {
+      if (all(is.na(r))) return(NA_character_)
+      paste(names(which(r == max(r, na.rm = TRUE))), collapse = ", ")
+    })
+    mean_acc <- round(colMeans(acc_mat, na.rm = TRUE), 4)
+    t_acc <- rbind(t_acc, c(as.list(mean_acc), Best = "—"))
+    t_acc <- cbind(Dataset = c(rownames(acc_mat), "Mean"), t_acc)
+    rownames(t_acc) <- NULL
+
+    tag <- paste0("table3_acc_", ct)
+    cat(sprintf("\n=== Table 3 [%s] — Accuracy per discretiser ===\n", lbl))
+    print(t_acc, row.names = FALSE)
+    write.csv(t_acc, paste0(tag, ".csv"), row.names = FALSE)
+
+    # ── AUC table ────────────────────────────────────────────────────────────
+    if (!is.null(auc_mat)) {
+      t_auc <- as.data.frame(round(auc_mat, 4))
+      t_auc$Best <- apply(auc_mat, 1, function(r) {
+        if (all(is.na(r))) return(NA_character_)
+        paste(names(which(r == max(r, na.rm = TRUE))), collapse = ", ")
+      })
+      mean_auc <- round(colMeans(auc_mat, na.rm = TRUE), 4)
+      t_auc <- rbind(t_auc, c(as.list(mean_auc), Best = "—"))
+      t_auc <- cbind(Dataset = c(rownames(auc_mat), "Mean"), t_auc)
+      rownames(t_auc) <- NULL
+
+      tag_auc <- paste0("table3_auc_", ct)
+      cat(sprintf("\n=== Table 3 [%s] — AUC per discretiser ===\n", lbl))
+      print(t_auc, row.names = FALSE)
+      write.csv(t_auc, paste0(tag_auc, ".csv"), row.names = FALSE)
+    }
+  }
+}
+
+
+# =============================================================================
+# make_table4 — Friedman + Holm-Wilcoxon for EVERY classifier × metric
+# =============================================================================
+make_table4 <- function(bench1) {
+
+  clf_labels <- c(nb = "NaiveBayes", lr = "LogisticReg",
+                  xgb = "XGBoost",   oner = "OneR")
+
+  all_results <- list()
+
+  for (ct in names(bench1$acc_matrices)) {
+    lbl <- clf_labels[ct]
+
+    # Accuracy
+    res_acc <- run_posthoc(bench1$acc_matrices[[ct]], "Accuracy", lbl)
+    if (!is.null(res_acc)) {
+      pw <- res_acc$pairwise
+      names(pw) <- c("vs Method", "Mean GOLD", "Mean Other",
+                     "Mean Diff", "p (raw)", "p (Holm)", "Sig.")
+      tag <- paste0("table4_posthoc_acc_", ct, ".csv")
+      write.csv(pw, tag, row.names = FALSE)
+      cat(sprintf("  → saved %s\n", tag))
+      all_results[[paste0(ct, "_acc")]] <- res_acc
+    }
+
+    # AUC
+    if (!is.null(bench1$auc_matrices[[ct]])) {
+      res_auc <- run_posthoc(bench1$auc_matrices[[ct]], "AUC", lbl)
+      if (!is.null(res_auc)) {
+        pw <- res_auc$pairwise
+        names(pw) <- c("vs Method", "Mean GOLD", "Mean Other",
+                       "Mean Diff", "p (raw)", "p (Holm)", "Sig.")
+        tag <- paste0("table4_posthoc_auc_", ct, ".csv")
+        write.csv(pw, tag, row.names = FALSE)
+        cat(sprintf("  → saved %s\n", tag))
+        all_results[[paste0(ct, "_auc")]] <- res_auc
+      }
+    }
+  }
+
+  invisible(all_results)
+}
+
+run_posthoc <- function(mat, metric_label, clf_label) {
+
+  mat_cc <- mat[complete.cases(mat), , drop = FALSE]
+  if (nrow(mat_cc) < 5) {
+    cat(sprintf("\n  [%s | %s] Not enough complete datasets (%d).\n",
+                clf_label, metric_label, nrow(mat_cc)))
+    return(invisible(NULL))
+  }
+
+  cat(sprintf("\n%s\n", strrep("=", 65)))
+  cat(sprintf(" Post-hoc: %s | %s  (%d datasets)\n",
+              clf_label, metric_label, nrow(mat_cc)))
+  cat(sprintf("%s\n", strrep("=", 65)))
+
+  ft <- friedman.test(mat_cc)
+  cat(sprintf("\nFriedman: chi2(%.0f) = %.4f, p = %.4f  %s\n",
+              ft$parameter, ft$statistic, ft$p.value,
+              ifelse(ft$p.value < 0.05, "[SIGNIFICANT]", "[not significant]")))
+
+  if (!"GOLD" %in% colnames(mat_cc)) return(invisible(NULL))
+
+  competitors <- setdiff(colnames(mat_cc), "GOLD")
+  pvals <- vapply(competitors, function(nm)
+    tryCatch(
+      wilcox.test(mat_cc[, "GOLD"], mat_cc[, nm],
+                  paired = TRUE, exact = FALSE)$p.value,
+      error = function(e) NA_real_),
+    numeric(1))
+  adj  <- p.adjust(pvals, method = "holm")
+  diff <- vapply(competitors, function(nm)
+    mean(mat_cc[, "GOLD"] - mat_cc[, nm], na.rm = TRUE), numeric(1))
+
+  pw <- data.frame(
+    vs          = competitors,
+    Mean_GOLD   = round(mean(mat_cc[, "GOLD"], na.rm = TRUE), 4),
+    Mean_Other  = round(vapply(competitors, function(nm)
+      mean(mat_cc[, nm], na.rm = TRUE), numeric(1)), 4),
+    Mean_Diff   = round(diff,  4),
+    p_raw       = round(pvals, 4),
+    p_Holm      = round(adj,   4),
+    Sig         = ifelse(adj < 0.05, "YES *", "no"),
+    stringsAsFactors = FALSE)
+  pw <- pw[order(pw$p_Holm), ]
+
+  cat("\nHolm-corrected Wilcoxon: GOLD vs each discretiser\n\n")
+  print(pw, row.names = FALSE)
+  invisible(list(friedman = ft, pairwise = pw, matrix = mat_cc))
+}
+
+
+
 
 # =============================================================================
 # PART 8 — COMPARISON 2: GOLD vs None — accuracy only
@@ -1338,6 +1505,7 @@ stat_test_comparison1 <- function(acc_matrix) {
   invisible(list(friedman=ft, pairwise=pw, matrix=mat))
 }
 
+
 stat_test_comparison2 <- function(comp2_results) {
   cat("\n\n",rep("=",65),"\n",sep="")
   cat(" Statistical Tests — Comparison 2 (GOLD vs None)\n\n")
@@ -1382,75 +1550,25 @@ make_table2 <- function(bench1) {
   invisible(t2)
 }
 
-make_table3 <- function(bench1) {
-  # Accuracy table
-  t3 <- as.data.frame(round(bench1$acc_matrix, 4))
-  t3$Best <- apply(bench1$acc_matrix, 1, function(r) {
-    if (all(is.na(r))) return(NA_character_)
-    paste(names(which(r == max(r, na.rm=TRUE))), collapse=", ")
-  })
-  mean_vals <- round(colMeans(bench1$acc_matrix,na.rm=TRUE),4)
-  t3 <- rbind(t3, c(as.list(mean_vals), Best="—"))
-  t3 <- cbind(Dataset=c(rownames(bench1$acc_matrix),"Mean"), t3)
-  rownames(t3) <- NULL
-  cat("\n=== Table 3: NB accuracy per discretiser ===\n")
-  print(t3, row.names=FALSE);  write.csv(t3,"table3_nb_accuracy.csv",row.names=FALSE)
 
-  # AUC table
-  if (!is.null(bench1$auc_matrix)) {
-    t3b <- as.data.frame(round(bench1$auc_matrix, 4))
-    t3b$Best <- apply(bench1$auc_matrix, 1, function(r) {
-      if (all(is.na(r))) return(NA_character_)
-      paste(names(which(r == max(r, na.rm=TRUE))), collapse=", ")
-    })
-    mean_auc <- round(colMeans(bench1$auc_matrix, na.rm=TRUE), 4)
-    t3b <- rbind(t3b, c(as.list(mean_auc), Best="—"))
-    t3b <- cbind(Dataset=c(rownames(bench1$auc_matrix),"Mean"), t3b)
-    rownames(t3b) <- NULL
-    cat("\n=== Table 3b: NB AUC per discretiser ===\n")
-    print(t3b, row.names=FALSE);  write.csv(t3b,"table3b_nb_auc.csv",row.names=FALSE)
-  }
-  invisible(t3)
-}
-
-make_table4 <- function(bench2) {
+make_table5 <- function(bench2) {
   has_lr  <- "Disc_LogisticReg" %in% names(bench2)
   has_xgb <- "Disc_XGBoost"     %in% names(bench2)
   col_order <- c("Dataset","Disc_NB","None_GNB","Diff_NB")
   if(has_lr)  col_order <- c(col_order,"Disc_LogisticReg","None_LogisticReg","Diff_LR")
   if(has_xgb) col_order <- c(col_order,"Disc_XGBoost","None_XGBoost","Diff_XGB")
-  t4 <- bench2[,intersect(col_order,names(bench2)),drop=FALSE]
-  num_cols  <- setdiff(names(t4),"Dataset")
-  t4[num_cols] <- lapply(t4[num_cols], function(x) round(as.numeric(x),4))
-  diff_cols <- grep("^Diff_",names(t4),value=TRUE)
+  t5 <- bench2[,intersect(col_order,names(bench2)),drop=FALSE]
+  num_cols  <- setdiff(names(t5),"Dataset")
+  t5[num_cols] <- lapply(t5[num_cols], function(x) round(as.numeric(x),4))
+  diff_cols <- grep("^Diff_",names(t5),value=TRUE)
   acc_cols  <- setdiff(num_cols,diff_cols)
   mean_row  <- c(list(Dataset="Mean"),
-                 setNames(lapply(acc_cols,  function(c) round(mean(t4[[c]],na.rm=TRUE),4)), acc_cols),
-                 setNames(lapply(diff_cols, function(c) round(mean(t4[[c]],na.rm=TRUE),4)), diff_cols))
-  t4 <- rbind(t4, as.data.frame(mean_row,stringsAsFactors=FALSE))
-  cat("\n=== Table 4: GOLD vs None accuracy ===\n")
-  print(t4, row.names=FALSE);  write.csv(t4,"table4_gold_vs_none.csv",row.names=FALSE)
-  invisible(t4)
-}
-
-make_table5 <- function(bench1) {
-  stat1 <- stat_test_comparison1(bench1$acc_matrix)
-  t5 <- stat1$pairwise
-  names(t5) <- c("vs Method","Mean GOLD","Mean Other","Mean Diff","p (raw)","p (Holm)","Sig.")
-  cat("\n=== Table 5: Post-hoc Wilcoxon — Accuracy (GOLD vs each discretiser) ===\n")
-  print(t5, row.names=FALSE);  write.csv(t5,"table5_posthoc_acc.csv",row.names=FALSE)
-
-  # repeat for AUC matrix if available
-  if (!is.null(bench1$auc_matrix)) {
-    stat1_auc <- stat_test_comparison1(bench1$auc_matrix)
-    if (!is.null(stat1_auc)) {
-      t5b <- stat1_auc$pairwise
-      names(t5b) <- c("vs Method","Mean GOLD","Mean Other","Mean Diff","p (raw)","p (Holm)","Sig.")
-      cat("\n=== Table 5b: Post-hoc Wilcoxon — AUC (GOLD vs each discretiser) ===\n")
-      print(t5b, row.names=FALSE);  write.csv(t5b,"table5_posthoc_auc.csv",row.names=FALSE)
-    }
-  }
-  invisible(stat1)
+                 setNames(lapply(acc_cols,  function(c) round(mean(t5[[c]],na.rm=TRUE),4)), acc_cols),
+                 setNames(lapply(diff_cols, function(c) round(mean(t5[[c]],na.rm=TRUE),4)), diff_cols))
+  t5 <- rbind(t5, as.data.frame(mean_row,stringsAsFactors=FALSE))
+  cat("\n=== Table 5: GOLD vs None accuracy ===\n")
+  print(t5, row.names=FALSE);  write.csv(t5,"table5_gold_vs_none.csv",row.names=FALSE)
+  invisible(t5)
 }
 
 make_table6 <- function(bench2) {
@@ -1485,9 +1603,9 @@ make_table6 <- function(bench2) {
                                   lapply(acc_pairs, function(pr)
                                     wilcox_row(pr$d, pr$n, pr$label, bench2))))
   rownames(t6_acc) <- NULL
-  cat("\n=== Table 6: Wilcoxon — Accuracy: GOLD vs None ===\n")
+  cat("\n=== Table 6a: Wilcoxon — Accuracy: GOLD vs None ===\n")
   print(t6_acc, row.names=FALSE)
-  write.csv(t6_acc,"table6_wilcoxon_acc.csv",row.names=FALSE)
+  write.csv(t6_acc,"table6a_wilcoxon_acc.csv",row.names=FALSE)
 
   # AUC Wilcoxon
   t6_auc <- do.call(rbind, Filter(Negate(is.null),
@@ -1500,6 +1618,92 @@ make_table6 <- function(bench2) {
     write.csv(t6_auc,"table6b_wilcoxon_auc.csv",row.names=FALSE)
   }
   invisible(list(acc=t6_acc, auc=t6_auc))
+}
+
+
+# =============================================================================
+# Table 7 — Runtime comparison across discretisers
+# =============================================================================
+make_table7 <- function(bench1) {
+
+  # ── 1. Per-dataset runtime (summed over all classifiers → same value per clf)
+  rt <- unique(bench1$results[, c("Dataset", "Discretizer", "Disc_Time_s")])
+
+  # ── 2. Wide matrix: rows = datasets, cols = discretisers
+  rt_wide <- reshape(rt,
+                     idvar   = "Dataset",
+                     timevar = "Discretizer",
+                     direction = "wide")
+  names(rt_wide) <- gsub("Disc_Time_s\\.", "", names(rt_wide))
+  rownames(rt_wide) <- rt_wide$Dataset
+
+  # ── 3. Summary stats per discretiser
+  disc_cols <- setdiff(names(rt_wide), "Dataset")
+  t7 <- do.call(rbind, lapply(disc_cols, function(nm) {
+    v <- as.numeric(rt_wide[[nm]])
+    data.frame(
+      Discretizer = nm,
+      Mean_s      = round(mean(v, na.rm = TRUE), 3),
+      Median_s    = round(median(v, na.rm = TRUE), 3),
+      Min_s       = round(min(v,  na.rm = TRUE), 3),
+      Max_s       = round(max(v,  na.rm = TRUE), 3),
+      SD_s        = round(sd(v,   na.rm = TRUE), 3),
+      stringsAsFactors = FALSE
+    )
+  }))
+  t7 <- t7[order(t7$Mean_s), ]
+  rownames(t7) <- NULL
+
+  cat("\n=== Table 7: Discretiser runtime (seconds per fold, per dataset) ===\n")
+  print(t7, row.names = FALSE)
+  write.csv(t7, "table7_runtime.csv", row.names = FALSE)
+
+  # ── 4. Statistical tests on runtime
+  rt_mat <- as.matrix(rt_wide[, disc_cols])
+  rt_mat_cc <- rt_mat[complete.cases(rt_mat), , drop = FALSE]
+
+  if (nrow(rt_mat_cc) >= 5) {
+    cat("\n--- Runtime statistical tests ---\n")
+
+    ft <- friedman.test(rt_mat_cc)
+    cat(sprintf(
+      "\nFriedman test: chi2(%.0f) = %.4f, p = %.4f  %s\n",
+      ft$parameter, ft$statistic, ft$p.value,
+      ifelse(ft$p.value < 0.05, "[SIGNIFICANT]", "[not significant]")
+    ))
+
+    if ("GOLD" %in% colnames(rt_mat_cc)) {
+      competitors <- setdiff(colnames(rt_mat_cc), "GOLD")
+      pvals <- vapply(competitors, function(nm)
+        tryCatch(
+          wilcox.test(rt_mat_cc[, "GOLD"], rt_mat_cc[, nm],
+                      paired = TRUE, exact = FALSE)$p.value,
+          error = function(e) NA_real_
+        ), numeric(1))
+      adj  <- p.adjust(pvals, method = "holm")
+      diff <- vapply(competitors, function(nm)
+        mean(rt_mat_cc[, "GOLD"] - rt_mat_cc[, nm], na.rm = TRUE),
+        numeric(1))
+
+      pw7 <- data.frame(
+        vs          = competitors,
+        Mean_GOLD   = round(mean(rt_mat_cc[, "GOLD"], na.rm = TRUE), 3),
+        Mean_Other  = round(vapply(competitors, function(nm)
+          mean(rt_mat_cc[, nm], na.rm = TRUE), numeric(1)), 3),
+        Mean_Diff_s = round(diff, 3),
+        p_raw       = round(pvals, 4),
+        p_Holm      = round(adj,   4),
+        Sig         = ifelse(adj < 0.05, "YES *", "no"),
+        stringsAsFactors = FALSE
+      )
+      pw7 <- pw7[order(pw7$p_Holm), ]
+
+      cat("\nPost-hoc Wilcoxon (Holm-corrected): GOLD runtime vs each discretiser\n\n")
+      print(pw7, row.names = FALSE)
+      write.csv(pw7, "table7b_runtime_posthoc.csv", row.names = FALSE)
+    }
+  }
+  invisible(list(summary = t7, matrix = rt_wide))
 }
 
 
@@ -1518,16 +1722,20 @@ cat(sprintf("Loaded %d datasets: %s\n\n",
 t1 <- make_table1(datasets, meta)   # Table 1: properties with raw column counts
 disc_methods <- build_disc_methods(lambda=1)
 # Comparison 1
-bench1 <- run_comparison1(datasets, disc_methods, k=5, seed=42)
 
-saveRDS(bench1,'./bench1.rds')
-t2 <- make_table2(bench1)
-t3 <- make_table3(bench1)
-t5 <- make_table5(bench1)
+bench1       <- run_comparison1(datasets, disc_methods, k = 5, seed = 42)
+saveRDS(bench1, "./bench1.rds")
+make_table2(bench1)         # avg bins — unchanged
+make_table3(bench1)     # acc + AUC for all classifiers
+make_table4(bench1)     # Friedman + Wilcoxon for all classifiers × metrics
 
 # Comparison 2
 bench2 <- run_comparison2(datasets, lambda=1, k=5, seed=42)
 saveRDS(bench2,'./bench2.rds')
-t4 <- make_table4(bench2)
+t5 <- make_table5(bench2)
 t6 <- make_table6(bench2)
+
 stat_test_comparison2(bench2)
+# compare run time
+t7 <- make_table7(bench1)
+
